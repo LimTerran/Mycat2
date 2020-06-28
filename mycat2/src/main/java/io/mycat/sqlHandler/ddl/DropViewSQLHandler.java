@@ -7,14 +7,14 @@ import io.mycat.sqlHandler.ExecuteCode;
 import io.mycat.sqlHandler.SQLRequest;
 import io.mycat.util.Response;
 
-import javax.annotation.Resource;
 
-@Resource
+
+
 public class DropViewSQLHandler extends AbstractSQLHandler<SQLDropViewStatement> {
 
     @Override
     protected ExecuteCode onExecute(SQLRequest<SQLDropViewStatement> request, MycatDataContext dataContext, Response response) {
-        response.proxyDDL(request.getAst());
+        response.sendOk();
         return ExecuteCode.PERFORMED;
     }
 }

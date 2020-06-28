@@ -20,7 +20,6 @@ import io.mycat.upondb.MycatDBClientMediator;
 import io.mycat.upondb.MycatDBs;
 import io.mycat.util.ContextExecuter;
 import io.mycat.util.Response;
-import io.mycat.util.SQLDispatcher;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +33,7 @@ import java.util.LinkedList;
  **/
 public enum MycatdbCommand implements MycatCommand {
     INSTANCE;
-    final static Logger logger = LoggerFactory.getLogger(SQLDispatcher.class);
+    final static Logger logger = LoggerFactory.getLogger(MycatdbCommand.class);
     final Collection<SQLHandler> sqlHandlers = new ArrayList<>();
 
     MycatdbCommand() {
@@ -88,6 +87,9 @@ public enum MycatdbCommand implements MycatCommand {
         sqlHandlers.add(new ShowVariantsSQLHandler());
         sqlHandlers.add(new ShowWarningsSQLHandler());
         sqlHandlers.add(new ShowCreateFunctionHanlder());
+
+        //Analyze
+        sqlHandlers.add(new AnalyzeHanlder());
     }
 
     @Override
@@ -114,7 +116,7 @@ public enum MycatdbCommand implements MycatCommand {
             try {
                 final String finalSql = request.getText().trim();
                 if (finalSql.startsWith("execute ")) {
-                    response.sendResultSet(client.executeRel(finalSql), () -> client.explainRel(finalSql));
+                    response.sendResultSet(()->client.executeRel(finalSql), () -> client.explainRel(finalSql));
                     isRun = true;
                 }
             } catch (Throwable e1) {
@@ -162,7 +164,8 @@ public enum MycatdbCommand implements MycatCommand {
                 }
             }
             if (!(statement instanceof com.alibaba.fastsql.sql.dialect.mysql.ast.statement.MySqlExecuteStatement)) {
-                receiver.sendError(new MycatException("no support query. sql={} class={}", req.getText(), statement.getClass()));
+                logger.error("no support query. sql={} class={}", req.getText(), statement.getClass());
+                receiver.proxyShow(statement);
             }else {
                 throw new RuntimeException("may be hbt");
             }
@@ -171,9 +174,9 @@ public enum MycatdbCommand implements MycatCommand {
             try {
                 String trim = req.getText().trim();
                 String pre = "execute plan ";
-                if (trim.startsWith(pre)) {
+                if (trim.toLowerCase().startsWith(pre)) {
                     final String finalSql = trim.substring(pre.length());
-                    receiver.sendResultSet(db.executeRel(finalSql), () -> db.explainRel(finalSql));
+                    receiver.sendResultSet(()->db.executeRel(finalSql), () -> db.explainRel(finalSql));
                     isRun = true;
                 }
             } catch (Throwable e1) {
@@ -189,7 +192,8 @@ public enum MycatdbCommand implements MycatCommand {
 
     @NotNull
     private Iterator<SQLStatement> parse(String text) {
-        if (text.startsWith("begin")) {
+        text = text.trim();
+        if (text.startsWith("begin") || text.startsWith("BEGIN")) {
             SQLStartTransactionStatement sqlStartTransactionStatement = new SQLStartTransactionStatement();
             return new Iterator<SQLStatement>() {
                 boolean hasNext = true;

@@ -1,10 +1,7 @@
 package io.mycat.config;
 
 import io.mycat.util.YamlUtil;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -15,6 +12,7 @@ import java.util.stream.Stream;
 
 @Data
 @Builder
+@EqualsAndHashCode
 public class PatternRootConfig {
     private UserConfig user;
     private List<Map<String,Object>> sqls = new ArrayList<>();
@@ -22,17 +20,19 @@ public class PatternRootConfig {
     private Map<String,Object> defaultHanlder;
     private String transactionType;
     private String matcherClazz;
+    private List<String> boosters = new ArrayList<>();
 
     public PatternRootConfig() {
     }
 
-    public PatternRootConfig(UserConfig user, List<Map<String, Object>> sqls, List<List<Map<String, Object>>> sqlsGroup, Map<String, Object> defaultHanlder, String transactionType, String matcherClazz) {
+    public PatternRootConfig(UserConfig user, List<Map<String, Object>> sqls, List<List<Map<String, Object>>> sqlsGroup, Map<String, Object> defaultHanlder, String transactionType, String matcherClazz,List<String> boosters) {
         this.user = user;
         this.sqls = sqls;
         this.sqlsGroup = sqlsGroup;
         this.defaultHanlder = defaultHanlder;
         this.transactionType = transactionType;
         this.matcherClazz = matcherClazz;
+        this.boosters = boosters;
     }
 
     public List<Map<String,Object>> getSqls() {//注意去重
@@ -45,28 +45,7 @@ public class PatternRootConfig {
         return Stream.concat(sqlsGroup.stream().flatMap(i -> i.stream()), sqls.stream()).distinct().collect(Collectors.toList());
     }
 
-    @Data
-    @AllArgsConstructor
-    @NoArgsConstructor
-    @Builder
-    public static class UserConfig {
-        private String username;
-        private String password;
-        private String ip;
-    }
 
-//    @Data
-//    @ToString
-//    public static class TextItemConfig {
-//        String name;
-//        String sql;
-//        //handler
-//        List<String> hints = new ArrayList<>();
-//        Map<String, String> tags = new HashMap<>();
-//        String command;
-//        String explain;
-//        String cache;
-//    }
 
     public static void main(String[] args) {
         PatternRootConfig config = PatternRootConfig.builder().user(

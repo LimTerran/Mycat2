@@ -18,17 +18,16 @@ package io.mycat.datasource.jdbc.datasource;
 import io.mycat.MycatException;
 import io.mycat.config.DatasourceRootConfig;
 import io.mycat.datasource.jdbc.DatasourceProvider;
-import io.mycat.logTip.MycatLogger;
-import io.mycat.logTip.MycatLoggerFactory;
+import io.mycat.replica.ReplicaSelectorRuntime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.sql.DataSource;
+import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Collections;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -47,13 +46,36 @@ public class JdbcConnectionManager implements ConnectionManager {
 
     @Override
     public void addDatasource(DatasourceRootConfig.DatasourceConfig key) {
-        dataSourceMap.computeIfAbsent(key.getName(), dataSource1 -> datasourceProvider
-                .createDataSource(key));
+        dataSourceMap.computeIfAbsent(key.getName(), dataSource1 -> {
+            JdbcDataSource dataSource = datasourceProvider.createDataSource(key);
+            ReplicaSelectorRuntime.INSTANCE.registerDatasource(dataSource1, () -> dataSource.counter.get());
+            return dataSource;
+        });
     }
 
     @Override
     public void removeDatasource(String jdbcDataSourceName) {
-        dataSourceMap.remove(jdbcDataSourceName);
+        JdbcDataSource remove = dataSourceMap.remove(jdbcDataSourceName);
+        Optional.ofNullable(remove).map(i -> i.getDataSource()).ifPresent(i -> {
+            try {
+                Class<? extends DataSource> aClass = i.getClass();
+                Method[] methods = aClass.getMethods();
+                ArrayList<Method> methodList = new ArrayList<>();
+                for (Method method : methods) {
+                    if ("close".equals(method.getName())) {
+                        if (Void.TYPE.equals(method.getReturnType())) {
+                            methodList.add(method);
+                        }
+                    }
+                }
+                methodList.sort(Comparator.comparingInt(Method::getParameterCount));
+                if (!methodList.isEmpty()) {
+                    methodList.get(0).invoke(i);
+                }
+            } catch (Throwable e) {
+                LOGGER.warn("试图关闭数据源失败:{} ,{}", jdbcDataSourceName, e);
+            }
+        });
     }
 
     public DefaultConnection getConnection(String name) {
@@ -74,18 +96,21 @@ public class JdbcConnectionManager implements ConnectionManager {
                 DatasourceRootConfig.DatasourceConfig config = key.getConfig();
                 Connection connection = key.getDataSource().getConnection();
                 DefaultConnection defaultConnection = new DefaultConnection(connection, key, autocommit, transactionIsolation, readOnly, this);
-                try{
+                try {
                     return defaultConnection;
-                }finally {
+                } finally {
                     if (config.isInitSqlsGetConnection()) {
-                        try(Statement statement = connection.createStatement()){
-                            for (String initSql : config.getInitSqls()) {
-                                statement.execute(initSql);
+                        if (config.getInitSqls() != null && !config.getInitSqls().isEmpty()) {
+                            try (Statement statement = connection.createStatement()) {
+                                for (String initSql : config.getInitSqls()) {
+                                    statement.execute(initSql);
+                                }
                             }
                         }
                     }
                 }
             } catch (SQLException e) {
+                LOGGER.debug("", e);
                 key.counter.decrementAndGet();
                 throw new MycatException(e);
             }

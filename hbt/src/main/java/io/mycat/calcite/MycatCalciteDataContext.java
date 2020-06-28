@@ -16,20 +16,15 @@ package io.mycat.calcite;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import io.mycat.api.collector.UpdateRowIteratorResponse;
 import io.mycat.calcite.table.MycatLogicTable;
 import io.mycat.calcite.table.MycatPhysicalTable;
 import io.mycat.calcite.table.MycatReflectiveSchema;
-import io.mycat.calcite.table.PreComputationSQLTable;
 import io.mycat.metadata.SchemaHandler;
-import io.mycat.metadata.TableHandler;
+import io.mycat.TableHandler;
 import io.mycat.upondb.*;
 import org.apache.calcite.DataContext;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
-import org.apache.calcite.adapter.java.ReflectiveSchema;
 import org.apache.calcite.jdbc.CalciteSchema;
-import org.apache.calcite.linq4j.Enumerable;
-import org.apache.calcite.linq4j.Linq4j;
 import org.apache.calcite.linq4j.QueryProvider;
 import org.apache.calcite.materialize.SqlStatisticProvider;
 import org.apache.calcite.plan.Context;
@@ -43,6 +38,7 @@ import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.AbstractSchema;
 import org.apache.calcite.sql.SqlOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
+import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.sql2rel.SqlRexConvertletTable;
 import org.apache.calcite.sql2rel.SqlToRelConverter;
 import org.apache.calcite.tools.FrameworkConfig;
@@ -91,14 +87,12 @@ public class MycatCalciteDataContext implements DataContext, FrameworkConfig {
 
     public SchemaPlus getRootSchema() {
         MycatDBSharedServer uponDBSharedServer = uponDBContext.getUponDBSharedServer();
-        Function<Byte, SchemaPlus> function = new Function<Byte, SchemaPlus>() {
-            @Override
-            public SchemaPlus apply(Byte aByte) {
-                return getSchema(uponDBContext);
-            }
-        };
-        SchemaPlus component = uponDBSharedServer.getComponent(Components.SCHEMA,function);
-        return component;
+        Function<Byte, SchemaPlus> function = aByte -> getSchema(uponDBContext);
+        if (uponDBContext.config().isCache()) {
+            return uponDBSharedServer.getComponent(Components.SCHEMA, function);
+        } else {
+            return function.apply(Components.SCHEMA);
+        }
     }
 
     public JavaTypeFactory getTypeFactory() {
@@ -127,23 +121,23 @@ public class MycatCalciteDataContext implements DataContext, FrameworkConfig {
     }
 
 
-    public void preComputation(PreComputationSQLTable preComputationSQLTable) {
-        uponDBContext.cache(preComputationSQLTable, preComputationSQLTable.getTargetName(),preComputationSQLTable.getSql(),
-                Collections.emptyList(),()->preComputationSQLTable.scan(this).toList());
-    }
-
-    public Enumerable<Object[]> getPreComputation(PreComputationSQLTable preComputationSQLTable) {
-        Object o = uponDBContext.getCache(preComputationSQLTable,preComputationSQLTable.getTargetName(),preComputationSQLTable.getSql(),Collections.emptyList());
-        if (o != null) {
-            return Linq4j.asEnumerable((List<Object[]>) o);
-        } else {
-            return null;
-        }
-    }
-
-    public UpdateRowIteratorResponse getUpdateRowIterator(String targetName, List<String> sqls) {
-        return uponDBContext.update(targetName, sqls);
-    }
+//    public void preComputation(PreComputationSQLTable preComputationSQLTable) {
+//        uponDBContext.cache(preComputationSQLTable, preComputationSQLTable.getTargetName(),preComputationSQLTable.getSql(),
+//                Collections.emptyList(),()->preComputationSQLTable.scan(this).toList());
+//    }
+//
+//    public Enumerable<Object[]> getPreComputation(PreComputationSQLTable preComputationSQLTable) {
+//        Object o = uponDBContext.getCache(preComputationSQLTable,preComputationSQLTable.getTargetName(),preComputationSQLTable.getSql(),Collections.emptyList());
+//        if (o != null) {
+//            return Linq4j.asEnumerable((List<Object[]>) o);
+//        } else {
+//            return null;
+//        }
+//    }
+//
+//    public UpdateRowIteratorResponse getUpdateRowIterator(String targetName, List<String> sqls) {
+//        return uponDBContext.update(targetName, sqls);
+//    }
 
     public static SchemaPlus getSchema(MycatDBClientBased based) {
         SchemaPlus plus = CalciteSchema.createRootSchema(true).plus();
@@ -166,6 +160,11 @@ public class MycatCalciteDataContext implements DataContext, FrameworkConfig {
     }
 
     @Override
+    public SqlValidator.Config getSqlValidatorConfig() {
+        return SqlValidator.Config.DEFAULT;
+    }
+
+    @Override
     public SqlToRelConverter.Config getSqlToRelConverterConfig() {
         return MycatCalciteSupport.INSTANCE.config.getSqlToRelConverterConfig();
     }
@@ -184,7 +183,7 @@ public class MycatCalciteDataContext implements DataContext, FrameworkConfig {
     public RexExecutor getExecutor() {
         return (rexBuilder, constExps, reducedValues) -> {
             RexExecutor executor = MycatCalciteSupport.INSTANCE.config.getExecutor();
-            if (executor!=null) {
+            if (executor != null) {
                 executor.reduce(rexBuilder, constExps, reducedValues);
             }
         };
@@ -249,29 +248,30 @@ public class MycatCalciteDataContext implements DataContext, FrameworkConfig {
         String uniqueName = targetName + "." + schema + "." + table;
         SchemaPlus rootSchema = getRootSchema();
         Set<String> subSchemaNames = rootSchema.getSubSchemaNames();
-        for (String subSchemaName :subSchemaNames) {
+        for (String subSchemaName : subSchemaNames) {
             SchemaPlus subSchema = rootSchema.getSubSchema(subSchemaName);
-            log.debug("schemaName:{}",subSchemaName);
+            log.debug("schemaName:{}", subSchemaName);
             Set<String> tableNames = subSchema.getTableNames();
-            log.debug("tableNames:{}",tableNames);
+            log.debug("tableNames:{}", tableNames);
             for (String tableName : tableNames) {
                 Table table1 = subSchema.getTable(tableName);
                 if (table1 instanceof MycatLogicTable) {
                     Map<String, MycatPhysicalTable> dataNodeMap = ((MycatLogicTable) table1).getDataNodeMap();
-                    log.debug("dataNodeMap:{}",dataNodeMap);
+                    log.debug("dataNodeMap:{}", dataNodeMap);
                     if (dataNodeMap.containsKey(uniqueName)) {
-                        return Objects.requireNonNull((MycatLogicTable)table1);
+                        return Objects.requireNonNull((MycatLogicTable) table1);
                     }
                 }
             }
         }
         return null;
     }
+
     final static Logger log = LoggerFactory.getLogger(MycatCalciteDataContext.class);
 
-   public AtomicBoolean getCancelFlag(){
-    return DataContext.Variable.CANCEL_FLAG.get(this);
-   }
+    public AtomicBoolean getCancelFlag() {
+        return DataContext.Variable.CANCEL_FLAG.get(this);
+    }
 
 
 }

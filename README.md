@@ -2,7 +2,7 @@
 
 # mycat 2.0-readme
 
-author:junwen  2020-5-6
+author:junwen  2020-6-1
 
 作者qq: 294712221
 
@@ -160,7 +160,7 @@ mvn package -Dmaven.test.skip=true
 ## 设置版本
 
 ```
-versions:setVariable -DnewVersion=1.xxx-SNAPSHOT
+versions:set -DnewVersion=1.xxx-SNAPSHOT
 ```
 
 
@@ -181,8 +181,8 @@ db1.sql,db2.sql,db3.sql是测试用的表
 
 ```shell
 下载安装包
-wget http://dl.mycat.io/2.0-release/1.01/mycat2-1.01-SNAPSHOT.tar.gz
-tar -xvf mycat2-1.01-SNAPSHOT.tar.gz
+wget http://dl.mycat.org.cn/2.0/xxxx
+tar -xvf xxx.gz
 修改/root/mycat/conf/mycat.yml文件
 cd mycat/bin
 ./mycat start
@@ -208,8 +208,8 @@ cd mycat/bin
 
 ```shell
 下载安装包
-http://dl.mycat.io/2.0-release/1.01/mycat2-1.01-SNAPSHOT.tar.gz
-tar -xvf mycat2-1.01-SNAPSHOT.tar.gz
+http://dl.mycat.org.cn/2.0/xxxx
+tar -xvf xxx.gz
 修改/root/mycat/conf/mycat.yml文件
 cd mycat/bin
 ./mycat insatll
@@ -248,11 +248,71 @@ default_authentication_plugin = mysql_native_password
 
 --default-auth-password=mysql_native_password
 
+--default-auth=mysql_native_password
+
 推荐先采用命令行测试：
 
 ```
 mysql -uroot -proot -P8066 -h127.0.0.1
 ```
+
+
+
+mysql8客户端要加上-A参数禁用预读功能
+
+```
+mysql -A -uroot -proot -P8066 -h127.0.0.1
+```
+
+
+
+客户端登录记录
+
+LINUX平台客户端
+
+```bash
+mysql  Ver 15.1 Distrib 10.1.44-MariaDB, for debian-linux-gnu (x86_64) using rea
+```
+
+
+
+```
+mysql  Ver 14.14 Distrib 5.6.33, for debian-linux-gnu (x86_64) using  EditLine wrapper
+```
+
+
+
+WINDOWS平台客户端
+
+```
+mysql  Ver 15.1 Distrib 10.3.15-MariaDB, for Win64 (AMD64), source revision 07aef9f7eb936de2b277f8ae209a1fd72510c011
+```
+
+
+
+```
+mysql  Ver 8.0.19 for Win64 on x86_64 (MySQL Community Server - GPL)
+```
+
+
+
+```
+SQLyog XXXX - MySQL GUI v12.3.1(64 bit)
+```
+
+
+
+```
+Navicat xxxx 12.1.22(64 bit)
+```
+
+
+
+```
+MySQL Workbench 8.0.19
+```
+
+支持select  current_user()
 
 
 
@@ -318,6 +378,8 @@ use db1;
 
 jdbc的连接属性建议使用连接字符串设置
 
+如果使用图形化客户端出现*no* *database* *selected* 等提示,请在JDBC连接字符串上写上默认库
+
 
 
 ##### mysql服务器设置参考
@@ -378,6 +440,16 @@ default-character-setVariable=utf8mb4
 
 
 #### 日志配置
+
+
+
+JVM调试参数
+
+```bash
+-Dlog4j.debug
+```
+
+
 
 wrapper.conf
 
@@ -488,6 +560,33 @@ targetName是目标名字,它可以是数据源的名字或者集群的名字
 
 
 
+#### 建立物理库,物理表的规律
+
+
+
+##### 规律1:与逻辑库名称路径一致的物理表
+
+用于
+
+1. schema上的配置默认目标
+2. 在代理架构下即mycat proxy没有设置成自动返回show语句的情况(比如使用命令配置),则配置的默认命令指向的默认目标
+
+
+
+此默认目标应该有非分片表与分片表的名字的物理库,此物理库具有提供查询逻辑表信息的作用(因为表名,库名与逻辑表一致),无需经过sql改写即可查询逻辑表的数据
+
+
+
+##### 规律2:若有全局表,则每一个跨服务器的分片建议建立一个相同名称路径的物理表
+
+这样的好处是涉及分片表与全局表的sql无需复杂分析,若判断sql涉及一个分片的分片表和任意多个全局表,只需改写分片表部分即可查询
+
+
+
+
+
+
+
 ####   Mycat2的分片分库分表运算
 
 ​		在分片分库分表中运算分为两个部分,一部分是后端每个数据库的运算,这部分运算以SQL作为中间语言发送到后端服务器,一部分以HBT形式在mycat里执行,占用内存主要是驻留的结果集的总大小.如果结果集合拼的结果行是固定行,固定列,结果集每个值长度也是固定的,那意味着运算都是reduce的,可以边运算边丢弃已处理的值,无需保存完整的后端处理结果.
@@ -559,7 +658,9 @@ metadata:
             }]
 ```
 
-mycatdb命令可以自动完成sql分析,进行读写分离
+mycatdb命令可以自动完成sql分析,进行读写分离,对于sql中没有库名的表,会自动添上逻辑库名字
+
+targetName可以是数据源或者集群
 
 
 
@@ -654,6 +755,8 @@ schemaName
 
 targetName
 
+可以是数据源或者集群名字
+
 如果不配置库,表的信息,无法路由的表发往该目标
 
 
@@ -677,9 +780,31 @@ targetName
 
 1.都需要建表sql
 
+
+
+此sql在mycat v1.09之后会自动从dataNode中查询得到,无需配置,但是遇上得到的createTableSQL是mycat无法解析的时候,就需要在mycat里面调整此sql直到mycat的sql解析器能识别并设置
+
+
+
 2.当建表sql中的字段信息带有AUTO_INCREMENT同时配置中有配置全局序列号,则该sql在插入数据的时候,自动改写sql补上自增值
 
+
+
 3.要么是自然分片要么是动态分片
+
+mycat v1.09后当分片类型不配置的时候,默认是NATURE_DATABASE_TABLE
+
+
+
+###### 建表sql的作用
+
+1.主要是为分布式查询引擎提供逻辑表与物理表的字段信息,具体体现为mycat能对查询逻辑表的sql编译成查询物理表的sql,如果没有字段信息,mycat就不能准确生成查询的字段.在配置中都提供字段信息的情况下,mycat可以脱离后端数据库独立编译sql为执行计划.
+
+2.提供自增字段的信息,是开启全局序列号的前提
+
+3.当建表sql带有索引信息,主键信息的时候,分布式查询引擎可以利用它优化算子(mycat v1.09)
+
+4.mycat会把分片字段与主键自动认为是带有索引的字段(mycat v1.09)
 
 
 
@@ -776,7 +901,7 @@ address:
 
 用户名:区分大小写
 
-密码:区分大小写
+密码:区分大小写,不写密码就是忽略密码
 
 ip:用户连接的远程ip接收的格式是
 
@@ -799,6 +924,77 @@ interceptors:
 ```
 
 此配置使用内置默认的mycatdb命令,根据分片配置进行处理,无需配置任何命令,默认事务是proxy
+
+该属性在mycat连接初始化的时候设置上,但是可以通过sql改变连接中的事务模式
+
+
+
+可选的事务
+
+proxy
+
+xa
+
+
+
+设置proxy是使用基于一个连接上实现的本地事务
+
+设置xa实际上是指使用数据源提供者的事务实现
+
+
+
+当数据源提供者为
+
+```yaml
+datasourceProviderClass: io.mycat.datasource.jdbc.datasourceProvider.AtomikosDatasourceProvider
+```
+
+
+
+当前事务状态为xa,则使用Atomikos的xa事务,并占用bindTransactionPool中的线程
+
+而提供者是其他类的时候,则不会使用bindTransactionPool中的线程
+
+直接使用 workerPool中的线程
+
+
+
+例如
+
+```yaml
+datasourceProviderClass: io.mycat.datasource.jdbc.datasourceProvider.DruidDatasourceProvider
+```
+
+当使用此数据源提供者的时候使用workerPool线程池,当设置xa事务的时候,是使用此DruidDatasourceProvider实现的事务是本地事务,多个连接commit在阶段失败,已经commit的连接不能回滚
+
+
+
+#### booster架构
+
+```yaml
+interceptors:
+  [{
+     user: {ip: '.', password: '123456', username: root},
+     boosters: [defaultDs2],
+     sqls:[
+    
+     ]
+   }]
+```
+
+例子：
+
+https://github.com/MyCATApache/Mycat2/blob/master/example/src/test/resources/io/mycat/example/booster/mycat.yml
+
+```yaml
+boosters: [defaultDs2]
+```
+
+在无事务且开启自动提交的情况下指定的sql发送到后端目标,该属性被mycatdb和boostMycatdb两个命令使用
+
+mycatdb会自动给缺默认库名的sql添上逻辑库,boostMycatdb则不会.
+
+此转发的后端目标一般是高性能的查询服务,mycat在此仅仅是高性能,处理事务或更新请求,对于查询,转发到其他服务处理
 
 
 
@@ -836,13 +1032,15 @@ datasource:
 
 
 
-maxConnectTimeout:单位millis
+### maxConnectTimeout
+
+单位millis
 
 配置中的定时器主要作用是定时检查闲置连接
 
 
 
-initSqlsGetConnection
+### initSqlsGetConnection
 
 true|false
 
@@ -852,11 +1050,39 @@ true|false
 
 
 
-datasourceProviderClass
+### datasourceProviderClass
 
 数据源提供者
 
 涉及jdbc,xa需要特定配置的DataSource,可以实现这个类,暂时mycat只支持mysql的数据源配置,使用mysql的xa数据源
+
+
+
+### type
+
+数据源类型
+
+###### NATIVE
+
+只使用NATIVE协议(即Mycat自研的连接MySQL的协议)
+
+###### JDBC
+
+只使用JDBC驱动连接
+
+示例
+
+https://github.com/MyCATApache/Mycat2/blob/master/example/src/test/resources/io/mycat/example/sharingXA/mycat.yml
+
+
+
+###### NATIVE_JDBC
+
+默认配置
+
+该数据源同一个配置同时可以使用NATIVE,JDBC
+
+
 
 
 
@@ -878,7 +1104,7 @@ cluster: #集群,数据源选择器,既可以mycat自行检查数据源可用也
               minSwitchTimeInterval: 12000 , #最小主从切换间隔
               heartbeatTimeout: 12000 , #心跳超时值,毫秒
               slaveThreshold: 0 , # mysql binlog延迟值
-              reuqestType: 'mysql' #进行心跳的方式,mysql或者jdbc两种
+              requestType: 'mysql' #进行心跳的方式,mysql或者jdbc两种
    }}
   ]
   timer: {initialDelay: 1000, period: 5, timeUnit: SECONDS} #心跳定时器
@@ -890,7 +1116,7 @@ MASTER_SLAVE中的masters的意思是主从切换顺序
 
 GARELA_CLUSTER的masters意思是这些节点同时成为主节点,负载均衡算法可以选择主节点
 
-reuqestType是进行心跳的实现方式,使用mysql意味着使用proxy方式进行,能异步地进行心跳,而jdbc方式会占用线程池
+requestType是进行心跳的实现方式,使用mysql意味着使用proxy方式进行,能异步地进行心跳,而jdbc方式会占用线程池
 
 当配置是主从的时候,发生主从切换,mycat会备份原来的配置(文件名带有版本号)然后使用更新的配置
 
@@ -898,12 +1124,19 @@ reuqestType是进行心跳的实现方式,使用mysql意味着使用proxy方式�
 
 ## 服务器配置
 
+基础配置样例
+
 ```yaml
 server:
   ip: 0.0.0.0
   port: 8066
   reactorNumber: 1
-  #用于多线程任务的线程池,
+```
+
+
+
+```yml
+  #用于多线程任务的线程池,v1.09前的配置
   worker: {
            maxPengdingLimit: 65535, #每个线程处理任务队列的最大长度
            maxThread: 1024,
@@ -911,6 +1144,69 @@ server:
            timeUnit: SECONDS, #超时单位
            waitTaskTimeout: 30 #超时后将结束闲置的线程
   }
+```
+
+
+
+v1.09后把原线程池划分为三大类
+
+
+
+bindTransactionPool
+
+对于Atomikos这种对于事务运行环境有要求的事务框架,它要求事务与线程相关,当使用事务的会话与线程绑定之后,在事务消失之前,此线程都不能被其他需要使用事务的会话使用.对于这种特殊要求的事务框架,使用独立的线程池处理事务请求.
+
+
+
+workerPool
+
+对于一些耗时长的,可能涉及阻塞的任务,jdbc请求,事务与线程没有绑定关系的事务处理,在这个线程里处理
+
+如Druid数据源提供的本地事务处理,并行拉取结果集等任务,就是这个线程里面处理的.
+
+
+
+timeWorkerPool
+
+对于对时间周期敏感的任务,使用独立的定时器处理,但是此定时器一般处理线程比较少,不会处理耗时任务,往往把任务投递到workerPool中处理
+
+
+
+三个线程池的配置都是一致的
+
+```yml
+ {corePoolSize: 0, keepAliveTime: 1, maxPendingLimit: 65535,
+    maxPoolSize: 512, taskTimeout: 1, timeUnit: MINUTES}
+```
+
+corePoolSize:是线程池里保留的最小线程数量
+
+keepAliveTime:线程存活时间,超过此时间的空闲线程将会关闭
+
+maxPoolSize:线程池中最大线程数量
+
+timeUnit:时间单位,对keepAliveTime,taskTimeout生效
+
+一般来说,taskTimeout与maxPendingLimit仅仅对bindTransactionPool生效
+
+
+
+```yml
+server:
+  bindTransactionPool: {corePoolSize: 0, keepAliveTime: 1, maxPendingLimit: 65535,
+    maxPoolSize: 512, taskTimeout: 1, timeUnit: MINUTES}
+  bufferPool:
+    args: {}
+    poolName: null
+  handlerName: null
+  ip: 0.0.0.0
+  port: 8066
+  reactorNumber: 1
+  timeWorkerPool: {corePoolSize: 0, keepAliveTime: 1, maxPendingLimit: 65535, maxPoolSize: 2,
+    taskTimeout: 1, timeUnit: MINUTES}
+  timer: {initialDelay: 3, period: 15, timeUnit: SECONDS}
+  workerPool: {corePoolSize: 8, keepAliveTime: 1, maxPendingLimit: 65535, maxPoolSize: 1024,
+    taskTimeout: 1, timeUnit: MINUTES}
 ```
 
 
@@ -991,6 +1287,10 @@ workerId对应雪花算法的参数
 
 ## Mycat2.0分布式查询支持语法
 
+select语法
+
+
+
 ```yaml
 query:
 
@@ -1040,6 +1340,20 @@ groupItem:
   |   '(' expression [, expression ]* ')'
 
 ```
+
+Select 语法支持使用for update结尾表示在事务中涉及的查询行使用排它锁,mycat会在最终发送的sql语句中加上for update后缀
+
+
+
+UNION语法(v1.09)
+
+```
+SELECT UNION [ALL | DISTINCT] SELECT ...
+```
+
+UNION语法中不支持使用for update,如果sql中添加了for update则自动忽略
+
+
 
 ## Mycat2.0分布式修改支持语法
 
@@ -1111,11 +1425,9 @@ HBTlang文档: <https://github.com/MyCATApache/Mycat2/blob/master/doc/103-HBTlan
 
 8. 聚合函数max,min函数不能与group by一起用
 
-9. union等集合操作暂时不支持
-
 10. 非查询语句,mycat暂时不会自动处理函数表达式调用,会路由到mysql中调用,所以按日期分表的情况,需要sql中写清楚日期
 
-11. 部分关联子查询暂时不支持
+11. 部分关联子查询暂时不支持(不可下推的子查询)
 
 
 
@@ -1165,8 +1477,6 @@ https://github.com/MyCATApache/Mycat2/blob/08045e4fda1eb135d2e6a7029ef4bcc5b7395
 
 https://github.com/MyCATApache/Mycat2/blob/70311cbed295f0a5f1a805c298993f88a6331765/mycat2/src/test/java/io/mycat/sql/CharChecker.java
 
-## SQL支持情况
-
 
 
 
@@ -1189,7 +1499,9 @@ https://github.com/MyCATApache/Mycat2/blob/master/example/src/test/resources/io/
 
 ## 高级内容
 
-### 多配置文件
+
+
+##### 多配置文件
 
 -DMYCAT_HOME=mycat2\src\main\resources 指向的是配置文件夹
 
@@ -1231,6 +1543,40 @@ cluster:
 
 
 
+##### 配置动态更新
+
+
+
+###### 配置更新原理
+
+更新的对象满足以下条件
+
+对象支持并发修改,单例
+
+
+
+一类对象总是在请求时候获取并使用到结束
+
+逻辑库配置
+
+
+
+逻辑表配置
+
+
+
+一类对象无状态,仅仅是作为工具用途,在处理过程中获取对象
+
+负载均衡插件
+
+
+
+一类对象完全支持动态创建,并能根据属性自己维护状态,支持外部函数调整参数,调用close函数
+
+如native连接池,jdbc连接池
+
+
+
 ### 拦截器与命令
 
 #### SQL匹配
@@ -1252,6 +1598,65 @@ cluster:
 4. 显式的配置,明确哪些sql是怎样被mycat处理
 
    
+
+拦截器处理流程
+
+接收sql
+
+->匹配器分析获得可能可以处理的命令及其配置并依次匹配执行(io.mycat.commands.MycatCommand)
+
+->执行每个MycatCommand前执行命令中配置的io.mycat.Hint,其作用是提取信息保存到上下文中(Map)
+
+->检查上下文中是否有缓存配置,如果缓存中有数据则返回缓存数据
+
+->如果当前是explain语句,则执行MycatCommand的explain函数,否则执行run函数
+
+
+
+io.mycat.Hint 
+
+```java
+public interface Hint {
+    String getName();
+    void accept(String buffer, Map<String, Object> t);
+}
+```
+
+
+
+io.mycat.commands.MycatCommand
+
+```java
+public interface MycatCommand {
+
+    boolean run(MycatRequest request, MycatDataContext context, Response response);
+
+    boolean explain(MycatRequest request, MycatDataContext context, Response response);
+
+    String getName();
+}
+```
+
+
+
+Hint与MycatCommand都在Plug配置里加载
+
+
+
+```yaml
+plug:
+  command:
+    commands: 
+     - {clazz: xxx , name: xxx}
+  hint:
+    hints: 
+     - {clazz: xxx, name: xxx ,args:''}
+  loadBalance:
+    defaultLoadBalance: balanceRandom
+    .....
+```
+
+
 
 ##### 处理器基本形式
 
@@ -1390,7 +1795,69 @@ refreshInterval:刷新时间
 
 
 
+## 自定义分片算法(单值)
+
+单值分片算法抽象类
+
+io.mycat.router.CustomRuleFunction
+
+单值分片算法
+
+io.mycat.router.SingleValueRuleFunction
+
+
+
+例子
+
+```
+public class PartitionByLong extends SingleValueRuleFunction {
+
+  private PartitionUtil partitionUtil;
+  @Override
+  public String name() {
+    return "PartitionByLong";
+  }
+
+  @Override
+  public void init(ShardingTableHandler table, Map<String, String> properties, Map<String, String> ranges) {
+    int[] count = (toIntArray(properties.get("partitionCount")));
+    int[] length = toIntArray(properties.get("partitionLength"));
+    partitionUtil = new PartitionUtil(count, length);
+  }
+
+  @Override
+  public int calculateIndex(String columnValue) {
+    try {
+      long key = Long.parseLong(columnValue);
+      key = (key >>> 32) ^ key;
+      return partitionUtil.partition(key);
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException(
+          "columnValue:" + columnValue + " Please eliminate any quote and non number within it.",
+          e);
+    }
+  }
+
+  @Override
+  public int[] calculateIndexRange(String beginValue, String endValue) {
+    ......
+  }
+
+  @Override
+  public int getPartitionNum() {
+    return partitionUtil.getPartitionNum();
+  }
+}
+
+```
+
+
+
 ## 命令
+
+**命令名大小写敏感**
+
+
 
 ##### mycatdb
 
@@ -1470,6 +1937,36 @@ next_value_for('全局序列号名字')函数查询全局序列号
 
 ```yaml
 {name: explain,sql: 'EXPLAIN {statement}' ,command: explainSQL}
+```
+
+
+
+##### boostMycatdb
+
+```yaml
+{sql: 'SELECT COUNT(1) FROM db1.travelrecord',command: boostMycatdb ,tags:{ boosters: defaultDs2 }}
+```
+
+在无事务且开启自动提交的情况下指定的sql发送到后端目标
+
+**该命令不会改变sql**
+
+
+
+参数
+
+```
+tags:{ boosters: defaultDs2 }
+```
+
+如果不配置参数
+
+则使用拦截器上的配置boosters
+
+也支持以列表方式配置
+
+```
+tags:{ boosters: [defaultDs2] }
 ```
 
 
@@ -1737,6 +2234,14 @@ RobPike的正则表达式实现,具体查看资料,没有文本提取功能
 
 可以完成匹配提取参数功能,但是使用有较大限制,具体看资料
 
+
+
+###### io.mycat.matcher.PatternFactory
+
+java.util.regex.Pattern的匹配器实现
+
+
+
 模式语法参考
 
 https://github.com/MyCATApache/Mycat2/blob/master/doc/29-mycat-gpattern.md
@@ -1789,8 +2294,299 @@ SQL被'SET NAMES utf8mb4'替换
 
 
 
-##### 更新日志
+## 实验性sql
+
+
+
+#### 客户端相关
+
+##### ANALYZE TABLE
+
+``` sql
+ANALYZE TABLE schemaName.tableName;
+ANALYZE TABLE db1.travelrecord;
+
+//res
+Table				Op			Msg_type	Msg_Text
+db1.travelrecord	analyze		status		OK
+```
+
+当表名为mycat中配置的表名时候,mycat会对存储节点发送查询行数量的语句,统计该逻辑表中所有表并记录,行数可以帮助优化器进行算子优化
+
+
+
+##### SHOW CREATE TABLE 
+
+```sql
+SHOW CREATE TABLE db1.travelrecord;
+
+//res
+Table	Create Table
+travelrecord	CREATE TABLE `travelrecord` ( `id` bigint(20) NOT NULL AUTO_INCREMENT,`user_id` varchar(100) CHARACTER SET utf8 DEFAULT NULL,`traveldate` date DEFAULT NULL,`fee` decimal(10,0) DEFAULT NULL,`days` int(11) DEFAULT NULL,`blob` longblob DEFAULT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+当表名为mycat中配置的表名时候,mycat会把配置中的建表sql返回
+
+当表名不存在时候,行为还没有定义(路由到第一个数据源)
+
+
+
+##### SHOW DATABASES
+
+```sql
+SHOW DATABASES;
+
+//res
+Database
+db1
+```
+
+mycat返回逻辑库信息
+
+
+
+##### SHOW ENGINES
+
+```
+SHOW ENGINES
+
+//res
+Engine	Support	Comment
+InnoDB	DRFAULT ...
+```
+
+mycat返回固定的引擎信息
+
+
+
+##### SHOW TABLES
+
+##### SHOW TABLE STATUS
+
+```sql
+SHOW TABLES;
+SHOW TABLES FROM db1;
+
+//res
+Tables_in_db1
+address1
+
+SHOW TABLE STATUS;
+SHOW TABLE STATUS  FROM db1;
+```
+
+sql中不带库名,如果mycat会话中设置了默认schema,则会对sql使用此schema作为库名补充
+
+然后根据库名获取逻辑库上配置的targetName路由,如果没有配置则路由到一个节点(此行为可能会改变)
+
+```sql
+use db1;
+SHOW TABLES;
+//实际mycat向后端发送的是SHOW TABLES FROM db1;
+```
+
+
+
+#### Mycat2管理与监控相关
+
+配置9066管理端
+
+管理端只有manager的用户才可以使用
+
+manager有独立的执行线程,一般不受8066的请求影响
+
+
+
+```yml
+manager:
+  ip: 127.0.0.1
+  port: 9066
+  users: [{ip: '.', password: '123456', username: root}]
+
+properties:
+  key: value
+```
+
+mycat中创建的连接一般有两大类,前端连接,后端连接,后端连接也区分native连接与jdbc连接
+
+
+
+###### kill
+
+```sql
+kill @@connection id1,id2...
+```
+
+id是mycat前端连接或者后端native连接的id(它们公用一个id生成器)
+
+
+
+###### 显示Mycat前端连接
+
+```sql
+show @@connection
+```
+
+
+
+###### 刷新配置(暂不开放)
+
+```sql
+reload @@config
+```
+
+
+
+###### 显示native连接
+
+```
+show @@backend.native
+```
+
+
+
+###### 显示数据源状态
+
+```sql
+show @@backend.datasource
+```
+
+
+
+###### 显示心跳状态
+
+```sql
+show @@backend.heartbeat
+```
+
+
+
+###### 显示可以使用的管理命令
+
+```sql
+show @@help
+```
+
+
+
+###### 显示心跳中数据源实例中的状态
+
+navite连接与jdbc连接使用相同的数据源配置,指向相同的服务器,那么它们的数据源实例只有一个
+
+```sql
+show @@backend.instance
+```
+
+
+
+###### 显示逻辑库配置
+
+```sql
+show @@metadata.schema
+```
+
+
+
+###### 显示逻辑表配置
+
+```sql
+show @@metadata.schema.table
+```
+
+
+
+###### 显示reactor线程状态
+
+reactor是mycat2的io线程,主要处理透传响应与接收报文,解析sql等任务
+
+```sql
+show @@reactor
+```
+
+
+
+###### 显示集群状态
+
+```sql
+show @@backend.replica
+```
+
+
+
+###### 显示定时器状态
+
+```sql
+show @@schedule
+```
+
+
+
+###### 显示sql统计信息(暂时没有数据)
+
+```sql
+show @@stat
+```
+
+
+
+###### 显示线程池状态
+
+```sql
+show @@threadPool
+```
+
+
+
+###### 设置数据源实例状态
+
+```sql
+switch @@backend.instance = {name:'xxx' ,alive:'true' ,readable:'true'} 
+```
+
+name是数据源名字
+
+alive是数据源可用状态,值 true|false
+
+readable是数据源可读状态,值 true|false
+
+此命令供外部服务修改mycat里的数据源实例状态,可以以此支持多种集群服务
+
+
+
+###### 集群切换
+
+```
+switch @@backend.replica = {name:'xxx'} 
+```
+
+name是数据源名字
+
+手动触发集群切换
+
+此命令供外部服务修改mycat里的数据源实例状态,可以以此支持多种集群服务
+
+
+
+###### 心跳开关
+
+```sql
+switch @@backend.heartbeat = {true|false}
+```
+
+当有心跳配置的时候,可以进心跳进行开启关闭
+
+心跳会自动修改数据源实例的状态,关闭心跳可以自行通过上面的命令修改状态
+
+此命令供外部服务修改mycat里的数据源实例状态,可以以此支持多种集群服务
+
+
+
+## 更新日志
 
 具体看git记录
 
 2020-5-5拦截器,元数据配置发生变更
+
+2020-6-19后,mycat.yml中的server设置发生变化
+
+2020-6-23后添加hint,MycatCommand配置

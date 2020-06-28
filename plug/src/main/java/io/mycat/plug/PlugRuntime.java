@@ -20,7 +20,7 @@ import java.util.*;
 import java.util.function.Supplier;
 
 public enum PlugRuntime {
-    INSTCANE;
+    INSTANCE;
     volatile LoadBalanceManager manager;
     volatile MycatConfig mycatConfig;
     static final Logger LOGGER = LoggerFactory.getLogger(PlugRuntime.class);
@@ -93,5 +93,9 @@ public enum PlugRuntime {
 
     public LoadBalanceStrategy getLoadBalanceByBalanceName(String name) {
         return manager.getLoadBalanceByBalanceName(name);
+    }
+
+    public LoadBalanceManager getManager() {
+        return Objects.requireNonNull(manager);
     }
 }

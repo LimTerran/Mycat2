@@ -19,17 +19,14 @@ import io.mycat.api.collector.RowIteratorUtil;
 import io.mycat.beans.mycat.MycatRowMetaData;
 import io.mycat.calcite.prepare.MycatCalcitePlanner;
 import io.mycat.calcite.resultset.CalciteRowMetaData;
-import io.mycat.calcite.table.PreComputationSQLTable;
+import io.mycat.calcite.table.SingeTargetSQLTable;
 import io.mycat.hbt.ColumnInfoRowMetaData;
 import io.mycat.hbt.RelNodeConvertor;
 import io.mycat.hbt.TextConvertor;
 import io.mycat.hbt.ast.base.Schema;
 import io.mycat.upondb.MycatDBContext;
 import io.mycat.util.Explains;
-import org.apache.calcite.config.CalciteConnectionConfig;
-import org.apache.calcite.config.CalciteConnectionConfigImpl;
-import org.apache.calcite.config.CalciteConnectionProperty;
-import org.apache.calcite.config.Lex;
+import org.apache.calcite.config.*;
 import org.apache.calcite.jdbc.Driver;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.calcite.plan.Context;
@@ -51,11 +48,14 @@ import org.apache.calcite.sql.*;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlAbstractParserImpl;
 import org.apache.calcite.sql.parser.SqlParser;
+import org.apache.calcite.sql.type.SqlTypeCoercionRule;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.calcite.sql.validate.SqlNameMatcher;
+import org.apache.calcite.sql.validate.SqlValidator;
+import org.apache.calcite.sql.validate.implicit.TypeCoercionFactory;
 import org.apache.calcite.sql2rel.SqlRexConvertlet;
 import org.apache.calcite.sql2rel.SqlRexConvertletTable;
 import org.apache.calcite.sql2rel.SqlToRelConverter;
@@ -126,6 +126,11 @@ public enum MycatCalciteSupport implements Context {
             .withInSubQueryThreshold(Integer.MAX_VALUE)
             .withRelBuilderFactory(relBuilderFactory).build();
 
+    public final SqlValidator.Config getValidatorConfig() {
+       return SqlValidator.Config.DEFAULT.withSqlConformance(calciteConnectionConfig.conformance());
+//                .withSqlConformance(calciteConnectionConfig.conformance());
+    }
+
 
     public MycatCalciteDataContext create(MycatDBContext uponDBContext) {
         return new MycatCalciteDataContext(uponDBContext);
@@ -146,6 +151,7 @@ public enum MycatCalciteSupport implements Context {
                 map.put("IFNULL", SqlStdOperatorTable.COALESCE);
                 build.put("SUBSTR", SqlStdOperatorTable.SUBSTRING);
                 build.put("CURDATE", SqlStdOperatorTable.CURRENT_DATE);
+                build.put("CURRENT_DATE",SqlStdOperatorTable.CURRENT_DATE);
                 build.put("NOW", SqlStdOperatorTable.LOCALTIMESTAMP);
                 build.put("LOG", SqlStdOperatorTable.LOG10);
                 build.put("PI",SqlStdOperatorTable.PI);
@@ -344,7 +350,7 @@ public enum MycatCalciteSupport implements Context {
     }
 
 
-    public String convertToHBTText(List<PreComputationSQLTable> tables) {
+    public String convertToHBTText(List<SingeTargetSQLTable> tables) {
         return tables.stream()
                 .map(preComputationSQLTable ->
                         new Explains.PrepareCompute(preComputationSQLTable.getTargetName(), preComputationSQLTable.getSql(), preComputationSQLTable.params()).toString()).collect(Collectors.joining(",\n"));

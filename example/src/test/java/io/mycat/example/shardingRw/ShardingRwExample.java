@@ -68,6 +68,7 @@ public class ShardingRwExample {
                 Assert.assertTrue(set.size() > 1);//验证没有事务的情况下,可以读写分离
             }
             statement.executeUpdate("delete from db1.travelrecordWrite");
+            statement.executeUpdate("delete from db1.travelrecordRead");
 
             Set<String> set2 = new HashSet<>();
             for (int i = 0; i < 10; i++) {
@@ -102,7 +103,7 @@ public class ShardingRwExample {
                     for (int i = 0; i < 10; i++) {
                         set.add(TestUtil.getString(statement.executeQuery(
                                 "explain select * from travelrecord"
-                        )));
+                        )).replaceAll("id=\\[\\d+\\]",""));
                     }
                     Assert.assertTrue(set.size() == 1);//验证有事务的情况下,不读写分离
                 }
@@ -114,7 +115,7 @@ public class ShardingRwExample {
                         for (int i = 0; i < 10; i++) {
                             set.add(TestUtil.getString(statement.executeQuery(
                                     "explain select * from travelrecord"
-                            )));
+                            )).replaceAll("id=\\[\\d+\\]",""));
                         }
                         Assert.assertEquals(1, set.size());//验证无事务的情况下但是set autocommit = 0,不读写分离
                     }

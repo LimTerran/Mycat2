@@ -4,12 +4,8 @@ import com.alibaba.fastsql.sql.ast.SQLStatement;
 import com.alibaba.fastsql.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.fastsql.sql.dialect.mysql.ast.statement.MySqlInsertStatement;
 import com.alibaba.fastsql.sql.dialect.mysql.ast.statement.MySqlUpdateStatement;
-import io.mycat.MycatDataContext;
-import io.mycat.MycatException;
-import io.mycat.RootHelper;
-import io.mycat.metadata.ParseContext;
+import io.mycat.*;
 import io.mycat.metadata.SchemaHandler;
-import io.mycat.metadata.TableHandler;
 import io.mycat.sqlHandler.AbstractSQLHandler;
 import io.mycat.sqlHandler.ExecuteCode;
 import io.mycat.sqlHandler.SQLRequest;
@@ -17,12 +13,10 @@ import io.mycat.upondb.MycatDBClientMediator;
 import io.mycat.upondb.MycatDBs;
 import io.mycat.util.Response;
 
-import javax.annotation.Resource;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-@Resource
 public class UpdateSQLHandler extends AbstractSQLHandler<MySqlUpdateStatement> {
 
     @Override
@@ -56,7 +50,12 @@ public class UpdateSQLHandler extends AbstractSQLHandler<MySqlUpdateStatement> {
         } else {
             Map<String, SchemaHandler> handlerMap = handlerMapOptional.get();
             schemaHandler = Optional.ofNullable(handlerMap.get(schemaName))
-                    .orElseGet(() -> handlerMap.get(mycatDBClientMediator.getSchema()));
+                    .orElseGet(() -> {
+                        if (mycatDBClientMediator.getSchema() == null) {
+                            throw new MycatException("unknown schema:"+schemaName);//可能schemaName有值,但是值名不是配置的名字
+                        }
+                        return handlerMap.get(mycatDBClientMediator.getSchema());
+                    });
             if (schemaHandler == null) {
                 receiver.sendError(new MycatException("Unable to route:" + sql));
                 return;
@@ -72,13 +71,36 @@ public class UpdateSQLHandler extends AbstractSQLHandler<MySqlUpdateStatement> {
         }
         String string = sql.toString();
         if (sql instanceof MySqlInsertStatement) {
-            receiver.multiInsert(string, tableHandler.insertHandler().apply(new ParseContext(sql.toString())));
+            switch (tableHandler.getType()) {
+                case SHARDING:
+                    receiver.multiInsert(string, tableHandler.insertHandler().apply(new ParseContext(sql.toString())));
+                    break;
+                case GLOBAL:
+                    receiver.multiGlobalInsert(string, tableHandler.insertHandler().apply(new ParseContext(sql.toString())));
+                    break;
+            }
+
         } else if (sql instanceof com.alibaba.fastsql.sql.dialect.mysql.ast.statement.MySqlDeleteStatement) {
-            receiver.multiUpdate(string, tableHandler.deleteHandler().apply(new ParseContext(sql.toString())));
+            switch (tableHandler.getType()) {
+                case SHARDING:
+                    receiver.multiUpdate(string, tableHandler.deleteHandler().apply(new ParseContext(sql.toString())));
+                    break;
+                case GLOBAL:
+                    receiver.multiGlobalUpdate(string, tableHandler.deleteHandler().apply(new ParseContext(sql.toString())));
+                    break;
+            }
+
         } else if (sql instanceof com.alibaba.fastsql.sql.dialect.mysql.ast.statement.MySqlUpdateStatement) {
-            receiver.multiUpdate(string, tableHandler.updateHandler().apply(new ParseContext(sql.toString())));
+            switch (tableHandler.getType()) {
+                case SHARDING:
+                    receiver.multiUpdate(string, tableHandler.updateHandler().apply(new ParseContext(sql.toString())));
+                    break;
+                case GLOBAL:
+                    receiver.multiGlobalUpdate(string, tableHandler.deleteHandler().apply(new ParseContext(sql.toString())));
+                    break;
+            }
         } else {
-            throw new UnsupportedOperationException("unsupported statement:"+sql);
+            throw new UnsupportedOperationException("unsupported statement:" + sql);
         }
 
     }

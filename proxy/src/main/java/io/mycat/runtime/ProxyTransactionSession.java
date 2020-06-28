@@ -4,6 +4,7 @@ import io.mycat.MycatDataContext;
 import io.mycat.ThreadUsageEnum;
 import io.mycat.beans.mycat.TransactionType;
 import io.mycat.datasource.jdbc.datasource.DefaultConnection;
+import io.mycat.util.Dumper;
 import lombok.SneakyThrows;
 
 import java.sql.Connection;
@@ -44,20 +45,11 @@ public class ProxyTransactionSession extends LocalTransactionSession {
     protected void callBackRollback() {
 
     }
-
     @Override
-    @SneakyThrows
-    public void check() {
-        Set<Map.Entry<String, DefaultConnection>> entries = updateConnectionMap.entrySet();
-        for (Map.Entry<String, DefaultConnection> entry : entries) {
-            DefaultConnection value = entry.getValue();
-            Connection rawConnection = value.getRawConnection();
-            if(!rawConnection.getAutoCommit()){
-                rawConnection.rollback();
-            }
-            value.close();
-        }
-        updateConnectionMap.clear();
-        dataSourceNearness.clear();
+    public Dumper snapshot() {
+        return super.snapshot()
+                .addText("name",name())
+                .addText("threadUsage",getThreadUsageEnum())
+                .addText("transactionType",this.transactionType());
     }
 }

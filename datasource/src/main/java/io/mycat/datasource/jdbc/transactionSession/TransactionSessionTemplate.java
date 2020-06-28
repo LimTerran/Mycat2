@@ -1,23 +1,28 @@
 package io.mycat.datasource.jdbc.transactionSession;
 
 import io.mycat.DataSourceNearness;
+import io.mycat.MycatConnection;
 import io.mycat.MycatDataContext;
 import io.mycat.TransactionSession;
 import io.mycat.beans.mysql.MySQLIsolation;
 import io.mycat.datasource.jdbc.datasource.DefaultConnection;
 import io.mycat.replica.DataSourceNearnessImpl;
+import io.mycat.util.Dumper;
 import lombok.SneakyThrows;
 
 import java.sql.Connection;
-import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public abstract class TransactionSessionTemplate implements TransactionSession {
-    protected final Map<String, DefaultConnection> updateConnectionMap = new HashMap<>();
-    protected final DataSourceNearness dataSourceNearness = new DataSourceNearnessImpl();
+    protected final Map<String, DefaultConnection> updateConnectionMap = new ConcurrentHashMap<>();
+    protected final DataSourceNearness dataSourceNearness = new DataSourceNearnessImpl(this);
     final MycatDataContext dataContext;
+    protected final ConcurrentLinkedQueue<AutoCloseable> closeResourceQueue = new ConcurrentLinkedQueue<>();
 
     public TransactionSessionTemplate(MycatDataContext dataContext) {
         this.dataContext = dataContext;
@@ -46,7 +51,7 @@ public abstract class TransactionSessionTemplate implements TransactionSession {
     }
 
     public void commit() {
-        if (isInTransaction()&&!updateConnectionMap.isEmpty()) {//真正开启事务才提交
+        if (isInTransaction() && !updateConnectionMap.isEmpty()) {//真正开启事务才提交
             callBackCommit();
         }
         setInTranscation(false);
@@ -55,7 +60,7 @@ public abstract class TransactionSessionTemplate implements TransactionSession {
     }
 
     public void rollback() {
-        if (isInTransaction()&&!updateConnectionMap.isEmpty()) {
+        if (isInTransaction() && !updateConnectionMap.isEmpty()) {
             callBackRollback();
         }
         setInTranscation(false);
@@ -64,11 +69,11 @@ public abstract class TransactionSessionTemplate implements TransactionSession {
     }
 
     @Override
-    public <T> T getConnection(
+    public MycatConnection getConnection(
             String targetName) {
         doAction();
         String dataSourceByTargetName = Objects.requireNonNull(dataSourceNearness.getDataSourceByTargetName(targetName));
-        return (T) callBackConnection( dataSourceByTargetName, isAutocommit(), getTransactionIsolation(), isReadOnly());
+        return callBackConnection(dataSourceByTargetName, isAutocommit(), getTransactionIsolation(), isReadOnly());
     }
 
     /**
@@ -78,8 +83,6 @@ public abstract class TransactionSessionTemplate implements TransactionSession {
         if (!isAutocommit()) {
             begin();
         }
-
-        dataSourceNearness.setUpdate(isInTransaction());
     }
 
     abstract protected void callBackBegin();
@@ -88,7 +91,7 @@ public abstract class TransactionSessionTemplate implements TransactionSession {
 
     abstract protected void callBackRollback();
 
-    abstract protected DefaultConnection callBackConnection(String jdbcDataSource, boolean autocommit, int transactionIsolation, boolean readOnly);
+    abstract protected MycatConnection callBackConnection(String jdbcDataSource, boolean autocommit, int transactionIsolation, boolean readOnly);
 
     public int getServerStatus() {
         return dataContext.serverStatus();
@@ -109,7 +112,7 @@ public abstract class TransactionSessionTemplate implements TransactionSession {
         this.dataContext.setInTransaction(inTranscation);
     }
 
-    public void close() {
+    public synchronized void close() {
         check();
         for (Map.Entry<String, DefaultConnection> stringDefaultConnectionEntry : updateConnectionMap.entrySet()) {
             DefaultConnection value = stringDefaultConnectionEntry.getValue();
@@ -145,6 +148,11 @@ public abstract class TransactionSessionTemplate implements TransactionSession {
             updateConnectionMap.clear();
             dataSourceNearness.clear();
         }
+        Iterator<AutoCloseable> iterator = closeResourceQueue.iterator();
+        while (iterator.hasNext()) {
+            iterator.next().close();
+            iterator.remove();
+        }
     }
 
     public void setTransactionIsolation(int transactionIsolation) {
@@ -163,4 +171,15 @@ public abstract class TransactionSessionTemplate implements TransactionSession {
         this.dataSourceNearness.clear();
     }
 
+    @Override
+    public void addCloseResource(AutoCloseable closeable) {
+        closeResourceQueue.add(closeable);
+    }
+
+    @Override
+    public Dumper snapshot() {
+        return Dumper.create()
+                .addText("jdbcCon", String.join(",", this.updateConnectionMap.keySet()))
+                .addText("closeQueueSize", String.valueOf(closeResourceQueue.size()));
+    }
 }

@@ -16,7 +16,6 @@ package io.mycat.calcite;
 
 import com.google.common.collect.ImmutableList;
 import io.mycat.calcite.table.MycatSQLTableScan;
-import io.mycat.calcite.table.MycatTransientSQLTable;
 import io.mycat.calcite.table.MycatTransientSQLTableScan;
 import org.apache.calcite.avatica.util.ByteString;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
@@ -40,6 +39,7 @@ import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.util.DateString;
 import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimestampString;
+import org.jetbrains.annotations.NotNull;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -52,6 +52,7 @@ import java.util.List;
  * @author Junwen Chen
  **/
 public class MycatRelBuilder extends RelBuilder {
+    int id = 0;
     public MycatRelBuilder(Context context, RelOptCluster cluster, RelOptSchema relOptSchema) {
         super(context, cluster, relOptSchema);
     }
@@ -64,7 +65,13 @@ public class MycatRelBuilder extends RelBuilder {
 
     public  RelNode makeTransientSQLScan(String targetName, RelNode input,boolean forUpdate) {
         RelDataType rowType = input.getRowType();
-        MycatConvention convention = MycatConvention.of(targetName,  new MysqlSqlDialect(MysqlSqlDialect.DEFAULT_CONTEXT){
+        MycatConvention convention = getConvertion(targetName);
+        return makeBySql(targetName,rowType,MycatCalciteSupport.INSTANCE.convertToSql(input, convention.dialect,forUpdate));
+    }
+
+    @NotNull
+    private MycatConvention getConvertion(String targetName) {
+        return MycatConvention.of(targetName,  new MysqlSqlDialect(MysqlSqlDialect.DEFAULT_CONTEXT){
             @Override
             public SqlNode getCastSpec(RelDataType type) {
                 return super.getCastSpec(type);
@@ -98,13 +105,6 @@ public class MycatRelBuilder extends RelBuilder {
             }
 
         });
-        MycatTransientSQLTable transientTable = new MycatTransientSQLTable(convention, input,forUpdate);
-        RelOptTable relOptTable = RelOptTableImpl.create(
-                this.getRelOptSchema(),
-                rowType,
-                transientTable,
-                ImmutableList.of(targetName, String.valueOf(input.getId())));
-        return new MycatTransientSQLTableScan(input.getCluster(), convention, relOptTable, () -> transientTable.getExplainSQL());
     }
 
 
@@ -188,11 +188,12 @@ public class MycatRelBuilder extends RelBuilder {
     public RelNode makeBySql(String targetName,RelDataType relDataType, String sql) {
         MycatConvention convention = MycatConvention.of(targetName, MysqlSqlDialect.DEFAULT);
         MycatSQLTableScan transientTable = new MycatSQLTableScan(convention,relDataType,sql);
+        id++;
         RelOptTable relOptTable = RelOptTableImpl.create(
                 this.getRelOptSchema(),
                 relDataType,
                 transientTable,
-                ImmutableList.of(targetName, sql));
+                ImmutableList.of(id +"$"+targetName, id+sql));//名称唯一
         return new MycatTransientSQLTableScan(this.getCluster(), convention, relOptTable, () -> sql);
     }
 }

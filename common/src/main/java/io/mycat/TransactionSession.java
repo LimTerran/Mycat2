@@ -15,11 +15,12 @@
 package io.mycat;
 
 import io.mycat.beans.mycat.TransactionType;
+import io.mycat.util.Dumper;
 
 /**
  * @author Junwen Chen
  **/
-public interface TransactionSession {
+public interface TransactionSession extends Dumpable{
 
     public final static String LOCAL = "local";
     public final static String XA = "xa";
@@ -41,7 +42,7 @@ public interface TransactionSession {
 
     boolean isAutocommit();
 
-    <T> T getConnection(String targetName);
+    MycatConnection getConnection(String targetName);
 
     void reset();
 
@@ -67,4 +68,7 @@ public interface TransactionSession {
      * 模拟autocommit = 0 时候自动开启事务
      */
     public void doAction();
+
+    public void addCloseResource(AutoCloseable closeable);
+
 }

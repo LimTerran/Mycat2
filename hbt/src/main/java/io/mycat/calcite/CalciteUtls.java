@@ -15,14 +15,12 @@
 package io.mycat.calcite;
 
 import com.google.common.collect.ImmutableList;
-import io.mycat.BackendTableInfo;
-import io.mycat.QueryBackendTask;
-import io.mycat.SchemaInfo;
-import io.mycat.metadata.ShardingTableHandler;
-import io.mycat.metadata.TableHandler;
+import io.mycat.*;
+import io.mycat.router.ShardingTableHandler;
 import io.mycat.queryCondition.DataMappingEvaluator;
-import io.mycat.queryCondition.SimpleColumnInfo;
 import org.apache.calcite.DataContext;
+import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Union;
 import org.apache.calcite.rel.rel2sql.SqlImplementor;
 import org.apache.calcite.rex.*;
 import org.apache.calcite.sql.SqlIdentifier;
@@ -48,23 +46,33 @@ public class CalciteUtls {
     private final static Logger LOGGER = LoggerFactory.getLogger(CalciteUtls.class);
 
     public static List<QueryBackendTask> getQueryBackendTasks(ShardingTableHandler table, List<RexNode> filters, int[] projects) {
-        List<BackendTableInfo> calculate = getBackendTableInfos(table, filters);
+        List<DataNode> calculate = getBackendTableInfos(table, filters);
 
 
         //
         List<SimpleColumnInfo> rawColumnList = table.getColumns();
         List<SimpleColumnInfo> projectColumnList = getColumnList(table, projects);
         List<QueryBackendTask> list = new ArrayList<>();
-        for (BackendTableInfo backendTableInfo : calculate) {
+        for (DataNode backendTableInfo : calculate) {
             String backendTaskSQL = getBackendTaskSQL(filters, rawColumnList, projectColumnList, backendTableInfo);
-            QueryBackendTask queryBackendTask = new QueryBackendTask( backendTableInfo.getTargetName(),backendTaskSQL);
+            QueryBackendTask queryBackendTask = new QueryBackendTask(backendTableInfo.getTargetName(), backendTaskSQL);
             list.add(queryBackendTask);
         }
         return list;
 
     }
 
-    public static List<BackendTableInfo> getBackendTableInfos(ShardingTableHandler table, List<RexNode> filters) {
+    public static void collect(Union e, List<RelNode> unions) {
+        for (RelNode input : e.getInputs()) {
+            if (input instanceof Union){
+                collect((Union)input,unions);
+            }else {
+                unions.add(input);
+            }
+        }
+    }
+
+    public static List<DataNode> getBackendTableInfos(ShardingTableHandler table, List<RexNode> filters) {
         LOGGER.info("origin  filters:{}", filters);
         DataMappingEvaluator record = new DataMappingEvaluator();
         ArrayList<RexNode> where = new ArrayList<>();
@@ -82,11 +90,10 @@ public class CalciteUtls {
     }
 
     @NotNull
-    public static String getBackendTaskSQL(List<RexNode> filters, List<SimpleColumnInfo> rawColumnList, List<SimpleColumnInfo> projectColumnList, BackendTableInfo backendTableInfo) {
-        SchemaInfo schemaInfo = backendTableInfo.getSchemaInfo();
-        String targetSchema = schemaInfo.getTargetSchema();
-        String targetTable = schemaInfo.getTargetTable();
-        String targetSchemaTable = schemaInfo.getTargetSchemaTable();
+    public static String getBackendTaskSQL(List<RexNode> filters, List<SimpleColumnInfo> rawColumnList, List<SimpleColumnInfo> projectColumnList, DataNode backendTableInfo) {
+        String targetSchema = backendTableInfo.getSchema();
+        String targetTable = backendTableInfo.getTable();
+        String targetSchemaTable = backendTableInfo.getTargetSchemaTable();
         return getBackendTaskSQL(filters, rawColumnList, projectColumnList, targetSchema, targetTable, targetSchemaTable);
     }
 
@@ -132,8 +139,8 @@ public class CalciteUtls {
         };
         try {
             return " where " + context.toSql(null, rexNode).toSqlString(MysqlSqlDialect.DEFAULT).getSql();
-        }catch (Exception e){
-            LOGGER.warn("不能生成对应的sql",e);
+        } catch (Exception e) {
+            LOGGER.warn("不能生成对应的sql", e);
         }
         return "";
     }
@@ -163,14 +170,14 @@ public class CalciteUtls {
                 RexNode left = operands.get(i);
                 RexNode right = operands.get(j);
                 if (left instanceof RexCall && right instanceof RexCall) {
-                    if ((left.isA(SqlKind.GREATER_THAN_OR_EQUAL)||left.isA(SqlKind.GREATER_THAN))  && (right.isA(SqlKind.LESS_THAN_OR_EQUAL)||right.isA(SqlKind.LESS_THAN))) {
-                        RexNode fisrtExpr = ((RexCall) left).getOperands().get(0);
-                        RexNode secondExpr = ((RexCall) right).getOperands().get(0);
+                    if ((left.isA(SqlKind.GREATER_THAN_OR_EQUAL) || left.isA(SqlKind.GREATER_THAN)) && (right.isA(SqlKind.LESS_THAN_OR_EQUAL) || right.isA(SqlKind.LESS_THAN))) {
+                        RexNode fisrtExpr = unCastWrapper(((RexCall) left).getOperands().get(0));
+                        RexNode secondExpr = unCastWrapper(((RexCall) right).getOperands().get(0));
                         if (fisrtExpr instanceof RexInputRef && secondExpr instanceof RexInputRef) {
                             int index = ((RexInputRef) fisrtExpr).getIndex();
                             if (index == ((RexInputRef) secondExpr).getIndex()) {
-                                RexNode start = ((RexCall) left).getOperands().get(1);
-                                RexNode end = ((RexCall) right).getOperands().get(1);
+                                RexNode start = unCastWrapper(((RexCall) left).getOperands().get(1));
+                                RexNode end = unCastWrapper(((RexCall) right).getOperands().get(1));
                                 if (start instanceof RexLiteral && end instanceof RexLiteral) {
                                     String startValue = ((RexLiteral) start).getValue2().toString();
                                     String endValue = ((RexLiteral) end).getValue2().toString();
@@ -195,10 +202,12 @@ public class CalciteUtls {
         } else if (filter.isA(SqlKind.EQUALS)) {
             RexCall call = (RexCall) filter;
             RexNode left = call.getOperands().get(0);
-            if (left.isA(SqlKind.CAST)) {
-                left = ((RexCall) left).operands.get(0);
-            }
+
+            left = unCastWrapper(left);
+
+
             RexNode right = call.getOperands().get(1);
+            right = unCastWrapper(right);
             if (left instanceof RexInputRef && right instanceof RexLiteral) {
                 int index = ((RexInputRef) left).getIndex();
                 String value = ((RexLiteral) right).getValue2().toString();
@@ -208,6 +217,13 @@ public class CalciteUtls {
 
         }
         return false;
+    }
+
+    private static RexNode unCastWrapper(RexNode left) {
+        if (left.isA(SqlKind.CAST)) {
+            left = ((RexCall) left).operands.get(0);
+        }
+        return left;
     }
 
 

@@ -313,11 +313,16 @@ public class SQLContextImpl implements SQLContext {
     static {
         addFunction(MysqlFunctions.next_value_for);
         addFunction(MysqlFunctions.last_insert_id);
+        addFunction(MysqlFunctions.current_user);
+        addFunction(MysqlFunctions.CURRENT_DATE);
+//        addFunction(MysqlFunctions.NOW);
     }
 
     static void addFunction(MySQLFunction function) {
-        functions.put(function.getFunctionName(), function);
-        functions.put(function.getFunctionName().toUpperCase(), function);
-        functions.put(function.getFunctionName().toLowerCase(), function);
+        for (String functionName : function.getFunctionNames()) {
+            functions.put(functionName, function);
+            functions.put(functionName.toUpperCase(), function);
+            functions.put(functionName.toLowerCase(), function);
+        }
     }
 }

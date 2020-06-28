@@ -15,9 +15,8 @@
 package io.mycat.router.function;
 
 import io.mycat.MycatException;
-import io.mycat.logTip.MycatLogger;
-import io.mycat.logTip.MycatLoggerFactory;
-import io.mycat.router.RuleFunction;
+import io.mycat.router.ShardingTableHandler;
+import io.mycat.router.SingleValueRuleFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,7 +28,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.function.Function;
 
-public class PartitionByFileMap extends RuleFunction {
+public class PartitionByFileMap extends SingleValueRuleFunction {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(PartitionByFileMap.class);
   /**
@@ -56,7 +55,7 @@ public class PartitionByFileMap extends RuleFunction {
   }
 
   @Override
-  public void init(Map<String, String> prot, Map<String, String> range) {
+  public void init(ShardingTableHandler tableHandler,Map<String, String> prot, Map<String, String> range) {
     String type = prot.get("type");
     defaultNode = Integer.parseInt(prot.get("defaultNode"));
     switch (type) {
@@ -95,7 +94,7 @@ public class PartitionByFileMap extends RuleFunction {
       default:
         throw new MycatException("unsupport type!!");
     }
-    for (Entry<String, String> entry : prot.entrySet()) {
+    for (Entry<String, String> entry : range.entrySet()) {
       Object key = transformation.apply(entry.getKey());
       int value = Integer.parseInt(entry.getValue());
       app2Partition.put(key, value);
@@ -107,7 +106,7 @@ public class PartitionByFileMap extends RuleFunction {
   }
 
   @Override
-  public int calculate(String columnValue) {
+  public int calculateIndex(String columnValue) {
     Object key = transformation.apply(columnValue);
     Integer integer = null;
     try {
@@ -123,12 +122,8 @@ public class PartitionByFileMap extends RuleFunction {
   }
 
   @Override
-  public int[] calculateRange(String beginValue, String endValue) {
+  public int[] calculateIndexRange(String beginValue, String endValue) {
     return calculateSequenceRange(this, beginValue, endValue);
   }
 
-  @Override
-  public int getPartitionNum() {
-    return partitionNum;
-  }
 }
